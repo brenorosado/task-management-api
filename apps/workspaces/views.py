@@ -4,12 +4,10 @@ from rest_framework.response import Response
 from rest_framework import status
 from apps.workspaces.models import Workspace
 from apps.workspaces.serializers import WorkspaceSerializer
-from drf_spectacular.utils import extend_schema
-from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from rest_framework.pagination import PageNumberPagination
 
-# Create your views here.
 class WorkspaceView(APIView):
-    permission_classes = [IsAuthenticated]
 
     @extend_schema(request=WorkspaceSerializer, responses=WorkspaceSerializer)
     def post(self, request):
@@ -24,14 +22,21 @@ class WorkspaceView(APIView):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    @extend_schema(responses=WorkspaceSerializer)
+    @extend_schema(
+            responses=WorkspaceSerializer,
+            parameters=[
+                OpenApiParameter(name='page', type=int, required=False, default=1),
+                OpenApiParameter(name='page_size', type=int, required=False, default=10)
+            ]
+    )
     def get(self, request):
-        workspaces = Workspace.objects.filter(owner=request.user, deleted=False)
-        serializer = WorkspaceSerializer(workspaces, many=True)
-        return Response(serializer.data)
+        workspaces = Workspace.objects.filter(owner=request.user, deleted=False).order_by('-created_at')
+        paginator = PageNumberPagination()
+        page = paginator.paginate_queryset(workspaces, request)
+        serializer = WorkspaceSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
     
 class WorkspaceDetailView(APIView):
-    permission_classes = [IsAuthenticated]
 
     @extend_schema(request=WorkspaceSerializer, responses=WorkspaceSerializer)
     def put(self, request, workspace_id):
