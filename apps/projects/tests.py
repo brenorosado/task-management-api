@@ -65,6 +65,23 @@ class ProjectDetailViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['name'], 'My Project')
 
+    def test_get_project_returns_members_list(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.url(self.project.id))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['members']), 1)
+        member = response.data['members'][0]['user']
+        self.assertEqual(member['email'], 'member@example.com')
+        self.assertEqual(member['name'], 'Member')
+        self.assertNotIn('password', member)
+
+    def test_get_project_returns_empty_members_when_none(self):
+        project = Project.objects.create(name='No Members', workspace=self.workspace)
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.url(project.id))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['members'], [])
+
     def test_get_project_not_member(self):
         self.client.force_authenticate(user=self.other_user)
         response = self.client.get(self.url(self.project.id))

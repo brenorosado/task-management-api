@@ -1,12 +1,21 @@
 from rest_framework import serializers
-from apps.projects.models import Project
+from apps.projects.models import Project, ProjectMember
+from apps.users.serializers import UserSerializer
 
+class ProjectMemberSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = ProjectMember
+        fields = ['user', 'created_at']
 
 class ProjectSerializer(serializers.ModelSerializer):
+    members = ProjectMemberSerializer(source='memberships', many=True, read_only=True)
+
     class Meta:
         model = Project
-        fields = ['id', 'name', 'description', 'workspace', 'created_at', 'updated_at', 'deleted', 'deleted_at']
-        read_only_fields = ['id', 'created_at', 'updated_at', 'deleted', 'deleted_at']
+        fields = ['id', 'name', 'description', 'workspace', 'members', 'created_at', 'updated_at', 'deleted', 'deleted_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'deleted', 'deleted_at', 'members']
 
     def create(self, validated_data):
         return Project.objects.create(**validated_data)
