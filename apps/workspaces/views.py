@@ -23,11 +23,11 @@ class WorkspaceView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @extend_schema(
-            responses=WorkspaceSerializer,
-            parameters=[
-                OpenApiParameter(name='page', type=int, required=False, default=1),
-                OpenApiParameter(name='page_size', type=int, required=False, default=10)
-            ]
+        responses=WorkspaceSerializer(many=True),
+        parameters=[
+            OpenApiParameter(name='page', type=int, required=False, default=1),
+            OpenApiParameter(name='page_size', type=int, required=False, default=10)
+        ]
     )
     def get(self, request):
         workspaces = Workspace.objects.filter(owner=request.user, deleted=False).order_by('-created_at')
@@ -75,5 +75,5 @@ class WorkspaceDetailView(APIView):
         
         return Response(
             { 'message': 'Workspace deleted successfully' },
-            status=status.HTTP_204_NO_CONTENT
+            status=status.HTTP_200_OK
         )
