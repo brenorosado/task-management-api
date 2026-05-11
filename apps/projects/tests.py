@@ -2,7 +2,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 from apps.users.models import User
 from apps.workspaces.models import Workspace
-from apps.projects.models import Project
+from apps.projects.models import Project, ProjectMember
 
 
 class ProjectViewTests(TestCase):
@@ -44,17 +44,47 @@ class ProjectDetailViewTests(TestCase):
         self.client = APIClient()
         self.user = User.objects.create_user('john@example.com', 'John', 'Xk9#mP2$qR7!')
         self.other_user = User.objects.create_user('jane@example.com', 'Jane', 'Xk9#mP2$qR7!')
+        self.member_user = User.objects.create_user('member@example.com', 'Member', 'Xk9#mP2$qR7!')
         self.workspace = Workspace.objects.create(name='My Workspace', owner=self.user)
         self.project = Project.objects.create(name='My Project', workspace=self.workspace)
+        ProjectMember.objects.create(project=self.project, user=self.member_user)
 
     def url(self, project_id):
         return f'/api/projects/{project_id}'
 
+    # GET
+    def test_get_project_as_owner(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(self.url(self.project.id))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'My Project')
+
+    def test_get_project_as_member(self):
+        self.client.force_authenticate(user=self.member_user)
+        response = self.client.get(self.url(self.project.id))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'My Project')
+
+    def test_get_project_not_member(self):
+        self.client.force_authenticate(user=self.other_user)
+        response = self.client.get(self.url(self.project.id))
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_project_unauthenticated(self):
+        response = self.client.get(self.url(self.project.id))
+        self.assertEqual(response.status_code, 401)
+
+    # PUT
     def test_update_project_success(self):
         self.client.force_authenticate(user=self.user)
         response = self.client.put(self.url(self.project.id), {'name': 'Renamed'})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['name'], 'Renamed')
+
+    def test_update_project_as_member_forbidden(self):
+        self.client.force_authenticate(user=self.member_user)
+        response = self.client.put(self.url(self.project.id), {'name': 'Hacked'})
+        self.assertEqual(response.status_code, 404)
 
     def test_update_project_not_found(self):
         self.client.force_authenticate(user=self.user)
@@ -70,6 +100,7 @@ class ProjectDetailViewTests(TestCase):
         response = self.client.put(self.url(self.project.id), {'name': 'X'})
         self.assertEqual(response.status_code, 401)
 
+    # DELETE
     def test_delete_project_success(self):
         self.client.force_authenticate(user=self.user)
         response = self.client.delete(self.url(self.project.id))
@@ -77,6 +108,11 @@ class ProjectDetailViewTests(TestCase):
         self.project.refresh_from_db()
         self.assertTrue(self.project.deleted)
         self.assertIsNotNone(self.project.deleted_at)
+
+    def test_delete_project_as_member_forbidden(self):
+        self.client.force_authenticate(user=self.member_user)
+        response = self.client.delete(self.url(self.project.id))
+        self.assertEqual(response.status_code, 404)
 
     def test_delete_project_not_found(self):
         self.client.force_authenticate(user=self.user)
@@ -97,6 +133,54 @@ class ProjectDetailViewTests(TestCase):
         self.project.deleted = True
         self.project.save()
         response = self.client.delete(self.url(self.project.id))
+        self.assertEqual(response.status_code, 404)
+
+
+class ProjectMembersViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user('john@example.com', 'John', 'Xk9#mP2$qR7!')
+        self.other_user = User.objects.create_user('jane@example.com', 'Jane', 'Xk9#mP2$qR7!')
+        self.member_user = User.objects.create_user('member@example.com', 'Member', 'Xk9#mP2$qR7!')
+        self.workspace = Workspace.objects.create(name='My Workspace', owner=self.user)
+        self.project = Project.objects.create(name='My Project', workspace=self.workspace)
+
+    def url(self, project_id):
+        return f'/api/projects/{project_id}/members'
+
+    def test_add_members_success(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(self.url(self.project.id), {'member_ids': [str(self.member_user.id)]}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(ProjectMember.objects.filter(project=self.project, user=self.member_user).exists())
+
+    def test_add_members_replaces_existing(self):
+        ProjectMember.objects.create(project=self.project, user=self.other_user)
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(self.url(self.project.id), {'member_ids': [str(self.member_user.id)]}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(ProjectMember.objects.filter(project=self.project, user=self.member_user).exists())
+        self.assertFalse(ProjectMember.objects.filter(project=self.project, user=self.other_user).exists())
+
+    def test_add_members_empty_list_removes_all(self):
+        ProjectMember.objects.create(project=self.project, user=self.member_user)
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(self.url(self.project.id), {'member_ids': []}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ProjectMember.objects.filter(project=self.project).count(), 0)
+
+    def test_add_members_not_owner(self):
+        self.client.force_authenticate(user=self.other_user)
+        response = self.client.post(self.url(self.project.id), {'member_ids': []}, format='json')
+        self.assertEqual(response.status_code, 404)
+
+    def test_add_members_unauthenticated(self):
+        response = self.client.post(self.url(self.project.id), {'member_ids': []}, format='json')
+        self.assertEqual(response.status_code, 401)
+
+    def test_add_members_project_not_found(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(self.url('00000000-0000-0000-0000-000000000000'), {'member_ids': []}, format='json')
         self.assertEqual(response.status_code, 404)
 
 
