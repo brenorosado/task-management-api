@@ -208,6 +208,12 @@ class TasksByProjectView(APIView):
 
         status_filter = request.query_params.get('status')
         if status_filter:
+            valid_statuses = [s[0] for s in Task.Status.choices]
+            if status_filter not in valid_statuses:
+                return Response(
+                    {'message': f'Invalid status. Valid values are: {", ".join(valid_statuses)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             tasks = tasks.filter(status=status_filter)
 
         assigned_to = request.query_params.get('assigned_to')

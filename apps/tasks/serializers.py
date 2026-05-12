@@ -4,8 +4,8 @@ from apps.tasks.models import Task
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
-        fields = ['id', 'name', 'description', 'status', 'project', 'assigned_to', 'blocked_by', 'created_at', 'created_by', 'updated_at', 'updated_by']
-        read_only_fields = ['id', 'created_at', 'created_by', 'updated_at', 'updated_by']
+        fields = ['id', 'name', 'description', 'status', 'project', 'assigned_to', 'blocked_by', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted', 'deleted_at']
+        read_only_fields = ['id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'deleted', 'deleted_at']
 
     def create(self, validated_data):
         assigned_to = validated_data.pop('assigned_to', [])
@@ -16,6 +16,7 @@ class TaskSerializer(serializers.ModelSerializer):
         return task
 
     def update(self, instance, validated_data):
+        validated_data.pop('project', None)
         if 'assigned_to' in validated_data:
             instance.assigned_to.set(validated_data.pop('assigned_to'))
         if 'blocked_by' in validated_data:
