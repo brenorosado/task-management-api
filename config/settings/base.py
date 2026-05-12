@@ -50,6 +50,13 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 10,
 }
 
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Task Management API',
+    'DESCRIPTION': 'API for managing workspaces, projects, and tasks.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+}
+
 # Application definition
 
 INSTALLED_APPS = [
