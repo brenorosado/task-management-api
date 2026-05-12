@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -85,10 +86,7 @@ class ProjectDetailView(APIView):
         project.deleted_at = timezone.now()
         project.save()
 
-        return Response(
-            { 'message': 'Project deleted successfully' },
-            status=status.HTTP_200_OK
-        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class ProjectMembersView(APIView):
 
@@ -103,16 +101,24 @@ class ProjectMembersView(APIView):
             )
 
         member_ids = request.data.get('member_ids', [])
-        ProjectMember.objects.filter(project=project).delete()
+
+        users = []
         for user_id in member_ids:
             try:
-                user = User.objects.get(id=user_id)
-                ProjectMember.objects.get_or_create(project=project, user=user)
+                users.append(User.objects.get(id=user_id))
             except User.DoesNotExist:
-                pass
+                return Response(
+                    {'message': f'User with id {user_id} not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+        with transaction.atomic():
+            ProjectMember.objects.filter(project=project).delete()
+            for user in users:
+                ProjectMember.objects.create(project=project, user=user)
 
         return Response(
-            { 'message': 'Project members updated successfully' },
+            ProjectSerializer(project).data,
             status=status.HTTP_200_OK
         )
 

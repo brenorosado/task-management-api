@@ -137,7 +137,7 @@ class WorkspaceDetailViewTests(TestCase):
     def test_delete_workspace_success(self):
         self.client.force_authenticate(user=self.user)
         response = self.client.delete(self.url(self.workspace.id))
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 204)
         self.workspace.refresh_from_db()
         self.assertTrue(self.workspace.deleted)
         self.assertIsNotNone(self.workspace.deleted_at)

@@ -87,8 +87,5 @@ class WorkspaceDetailView(APIView):
         workspace.deleted = True
         workspace.deleted_at = timezone.now()
         workspace.save()
-        
-        return Response(
-            { 'message': 'Workspace deleted successfully' },
-            status=status.HTTP_200_OK
-        )
+
+        return Response(status=status.HTTP_204_NO_CONTENT)

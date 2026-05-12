@@ -121,7 +121,7 @@ class ProjectDetailViewTests(TestCase):
     def test_delete_project_success(self):
         self.client.force_authenticate(user=self.user)
         response = self.client.delete(self.url(self.project.id))
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 204)
         self.project.refresh_from_db()
         self.assertTrue(self.project.deleted)
         self.assertIsNotNone(self.project.deleted_at)
