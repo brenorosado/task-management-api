@@ -6,11 +6,34 @@ from rest_framework.pagination import PageNumberPagination
 from apps.tasks.models import Task
 from apps.tasks.serializers import TaskSerializer
 from apps.projects.models import Project
+from apps.workspaces.models import Workspace
 from django.db.models import Q
 from django.utils import timezone
 from apps.users.models import User
 
-def validate_task_relations(request, project):
+
+class TaskPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+
+
+def has_cycle(task_id, blocker_ids):
+    visited = set()
+    queue = list(blocker_ids)
+    while queue:
+        current_id = str(queue.pop(0))
+        if current_id == str(task_id):
+            return True
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+        current = Task.objects.filter(id=current_id).first()
+        if current:
+            queue.extend(current.blocked_by.values_list('id', flat=True))
+    return False
+
+
+def validate_task_relations(request, project, task=None):
     blocked_by = request.data.get('blocked_by', [])
     for task_id in blocked_by:
         try:
@@ -20,6 +43,12 @@ def validate_task_relations(request, project):
                 {'message': f'Blocked task with id {task_id} not found in the project'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    if task and blocked_by and has_cycle(task.id, blocked_by):
+        return Response(
+            {'message': 'Circular dependency detected in blocked_by'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     assigned_to = request.data.get('assigned_to', [])
     for assigned_to_id in assigned_to:
@@ -37,6 +66,28 @@ def validate_task_relations(request, project):
             )
 
     return None
+
+
+def apply_task_filters(tasks, request):
+    status_filter = request.query_params.get('status')
+    if status_filter:
+        valid_statuses = [s[0] for s in Task.Status.choices]
+        if status_filter not in valid_statuses:
+            return None, Response(
+                {'message': f'Invalid status. Valid values are: {", ".join(valid_statuses)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        tasks = tasks.filter(status=status_filter)
+
+    assigned_to = request.query_params.get('assigned_to')
+    if assigned_to:
+        tasks = tasks.filter(assigned_to__id=assigned_to)
+
+    blocked_by = request.query_params.get('blocked_by')
+    if blocked_by:
+        tasks = tasks.filter(blocked_by__id=blocked_by)
+
+    return tasks, None
 
 
 class TaskView(APIView):
@@ -72,7 +123,7 @@ class TaskView(APIView):
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
 class TaskDetailView(APIView):
 
     @extend_schema(request=TaskSerializer, responses=TaskSerializer)
@@ -102,7 +153,7 @@ class TaskDetailView(APIView):
 
         project = task.project
 
-        error = validate_task_relations(request, project)
+        error = validate_task_relations(request, project, task=task)
         if error:
             return error
 
@@ -114,7 +165,7 @@ class TaskDetailView(APIView):
                 TaskSerializer(updated_task).data,
                 status=status.HTTP_200_OK
             )
-        
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(responses={204: None})
@@ -155,7 +206,7 @@ class DeletedTaskView(APIView):
             project=project, deleted=True
         ).order_by('-deleted_at')
 
-        paginator = PageNumberPagination()
+        paginator = TaskPagination()
         page = paginator.paginate_queryset(tasks, request)
         serializer = TaskSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
@@ -204,29 +255,50 @@ class TasksByProjectView(APIView):
         if not project:
             return Response({'message': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        tasks = Task.objects.filter(project=project, deleted=False)
+        tasks, error = apply_task_filters(
+            Task.objects.filter(project=project, deleted=False),
+            request
+        )
+        if error:
+            return error
 
-        status_filter = request.query_params.get('status')
-        if status_filter:
-            valid_statuses = [s[0] for s in Task.Status.choices]
-            if status_filter not in valid_statuses:
-                return Response(
-                    {'message': f'Invalid status. Valid values are: {", ".join(valid_statuses)}'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            tasks = tasks.filter(status=status_filter)
+        paginator = TaskPagination()
+        page = paginator.paginate_queryset(tasks.order_by('-created_at').distinct(), request)
+        serializer = TaskSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
-        assigned_to = request.query_params.get('assigned_to')
-        if assigned_to:
-            tasks = tasks.filter(assigned_to__id=assigned_to)
 
-        blocked_by = request.query_params.get('blocked_by')
-        if blocked_by:
-            tasks = tasks.filter(blocked_by__id=blocked_by)
+class TasksByWorkspaceView(APIView):
 
-        tasks = tasks.order_by('-created_at').distinct()
+    @extend_schema(
+        responses=TaskSerializer(many=True),
+        parameters=[
+            OpenApiParameter(name='page', type=int, required=False, default=1),
+            OpenApiParameter(name='page_size', type=int, required=False, default=10),
+            OpenApiParameter(name='status', type=str, required=False),
+            OpenApiParameter(name='assigned_to', type=str, required=False),
+            OpenApiParameter(name='blocked_by', type=str, required=False),
+        ]
+    )
+    def get(self, request, workspace_id):
+        workspace = Workspace.objects.filter(
+            Q(owner=request.user) | Q(projects__memberships__user=request.user),
+            id=workspace_id, deleted=False
+        ).distinct().first()
 
-        paginator = PageNumberPagination()
-        page = paginator.paginate_queryset(tasks, request)
+        if not workspace:
+            return Response({'message': 'Workspace not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        tasks, error = apply_task_filters(
+            Task.objects.filter(
+                project__workspace=workspace, project__deleted=False, deleted=False
+            ),
+            request
+        )
+        if error:
+            return error
+
+        paginator = TaskPagination()
+        page = paginator.paginate_queryset(tasks.order_by('-created_at').distinct(), request)
         serializer = TaskSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
